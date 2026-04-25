@@ -718,6 +718,7 @@ co_yield(int target_pid, int value)
     target_proc->trapframe->a0 = (uint64)value;
     target_proc->state = RUNNABLE;
     sleep(p->trapframe, &wait_lock);
+    release(&wait_lock);
     
     //when woken up, the return value will be stored on the a0 register, so we can just return it
     return (int)p->trapframe->a0;
@@ -725,6 +726,7 @@ co_yield(int target_pid, int value)
   
   // first arriver
   sleep(p->trapframe, &wait_lock); 
+  release(&wait_lock);
   //when woken up, the return value will be stored on the a0 register, so we can just return it
   return (int)p->trapframe->a0;
 }

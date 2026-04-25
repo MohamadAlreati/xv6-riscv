@@ -680,4 +680,51 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+
+}
+
+int
+co_yield(int target_pid, int value)
+{
+  struct proc *p = myproc();
+  struct proc *target_proc = 0;
+
+  // the target pid should be a legal pid
+  if (target_pid <= 0) {
+    return -1;
+  }
+
+  // the target pid cannot be the same as the caller's pid
+  if (target_pid == p->pid) {
+    return -1;
+  }
+
+  for(struct proc *t = proc; t < &proc[NPROC]; t++)
+    if(t->pid == target_pid){target_proc = t;}
+  
+  // target was not found
+  if(target_proc == 0){return -1;}
+
+  acquire(&wait_lock);
+
+  if(target_proc->killed){
+    release(&wait_lock);
+    // the co yiled partner was killed
+    return -1;
+  }
+  // second arriver
+  if(target_proc -> state == SLEEPING && target_proc->chan == target_proc->trapframe){
+    //set up the return value of the target side
+    target_proc->trapframe->a0 = (uint64)value;
+    target_proc->state = RUNNABLE;
+    sleep(p->trapframe, &wait_lock);
+    
+    //when woken up, the return value will be stored on the a0 register, so we can just return it
+    return (int)p->trapframe->a0;
+  }
+  
+  // first arriver
+  sleep(p->trapframe, &wait_lock); 
+  //when woken up, the return value will be stored on the a0 register, so we can just return it
+  return (int)p->trapframe->a0;
 }

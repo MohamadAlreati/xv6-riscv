@@ -21,6 +21,7 @@ sys_getpid(void)
   return myproc()->pid;
 }
 
+// Task 1
 uint64
 sys_memsize(void)
 {
@@ -94,4 +95,14 @@ sys_uptime(void)
   xticks = ticks;
   release(&tickslock);
   return xticks;
+}
+
+uint64
+sys_co_yield(void)
+{
+  int pid, value;
+  argint(0, &pid);
+  argint(1, &value);
+
+  return (uint64)co_yield(pid, value);
 }

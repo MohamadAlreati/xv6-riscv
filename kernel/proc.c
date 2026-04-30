@@ -449,24 +449,20 @@ scheduler(void)
   
   c->proc = 0;
   for(;;){
-    // Avoid deadlock by ensuring that devices can interrupt.
     intr_on();
-
-    for(p = proc; p < &proc[NPROC]; p++) {
-      acquire(&p->lock);
-      if(p->state == RUNNABLE) {
-        // Switch to chosen process.  It is the process's job
-        // to release its lock and then reacquire it
-        // before jumping back to us.
+    for(p = proc; p < &proc[NPROC]; p++){
+	  // an interrupt of middle of a co_yield's ping pong might cause a panic
+      if(!holding(&p->lock))
+		acquire(&p->lock);
+      if(p->state == RUNNABLE){
         p->state = RUNNING;
         c->proc = p;
         swtch(&c->context, &p->context);
-
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
         c->proc = 0;
       }
-      release(&p->lock);
+	  // an interrupt of middle of a co_yield's ping pong might cause a panic
+      if(holding(&p->lock))
+        release(&p->lock);
     }
   }
 }
@@ -699,34 +695,52 @@ co_yield(int target_pid, int value)
     return -1;
   }
 
-  for(struct proc *t = proc; t < &proc[NPROC]; t++)
-    if(t->pid == target_pid){target_proc = t;}
+  for(struct proc *t = proc; t < &proc[NPROC]; t++){
+    if(t->pid == target_pid){
+      target_proc = t;
+      break;
+    }
+  }
   
   // target was not found
   if(target_proc == 0){return -1;}
 
-  acquire(&wait_lock);
+  acquire(&wait_lock); //0
+  acquire(&target_proc->lock); //1
 
-  if(target_proc->killed){
+  if(target_proc->killed || target_proc->state == UNUSED || target_proc->state == ZOMBIE){
+    release(&target_proc->lock);
     release(&wait_lock);
-    // the co yiled partner was killed
     return -1;
   }
-  // second arriver
-  if(target_proc -> state == SLEEPING && target_proc->chan == target_proc->trapframe){
-    //set up the return value of the target side
+
+  // second arriver: do a direct handoff to the waiting partner
+  if(target_proc->state == SLEEPING && target_proc->chan == target_proc->trapframe){
     target_proc->trapframe->a0 = (uint64)value;
-    target_proc->state = RUNNABLE;
-    sleep(p->trapframe, &wait_lock);
-    release(&wait_lock);
-    
-    //when woken up, the return value will be stored on the a0 register, so we can just return it
+
+    acquire(&p->lock);  //2
+    p->chan = p->trapframe;
+    p->state = SLEEPING;
+    release(&p->lock);  //2
+
+    target_proc->state = RUNNING;
+    mycpu()->proc = target_proc;
+
+   
+    release(&wait_lock); //3
+    //push_off();
+    swtch(&p->context, &target_proc->context);
+    mycpu()->proc = p;
+
+    p->chan = 0;
+    release(&p->lock);
     return (int)p->trapframe->a0;
   }
-  
+
+  release(&target_proc->lock); //1
+
   // first arriver
-  sleep(p->trapframe, &wait_lock); 
-  release(&wait_lock);
-  //when woken up, the return value will be stored on the a0 register, so we can just return it
+  sleep(p->trapframe, &wait_lock);
+  release(&wait_lock); //0
   return (int)p->trapframe->a0;
 }

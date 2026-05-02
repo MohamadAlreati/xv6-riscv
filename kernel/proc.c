@@ -678,7 +678,6 @@ procdump(void)
   }
 
 }
-
 int
 co_yield(int target_pid, int value)
 {
@@ -696,21 +695,19 @@ co_yield(int target_pid, int value)
   }
 
   for(struct proc *t = proc; t < &proc[NPROC]; t++){
+    acquire(&t->lock);
     if(t->pid == target_pid){
       target_proc = t;
       break;
     }
+    release(&t->lock);
   }
   
   // target was not found
   if(target_proc == 0){return -1;}
 
-  acquire(&wait_lock); //0
-  acquire(&target_proc->lock); //1
-
   if(target_proc->killed || target_proc->state == UNUSED || target_proc->state == ZOMBIE){
     release(&target_proc->lock);
-    release(&wait_lock);
     return -1;
   }
 
@@ -727,8 +724,6 @@ co_yield(int target_pid, int value)
     mycpu()->proc = target_proc;
 
    
-    release(&wait_lock); //3
-    //push_off();
     swtch(&p->context, &target_proc->context);
     mycpu()->proc = p;
 
@@ -737,10 +732,25 @@ co_yield(int target_pid, int value)
     return (int)p->trapframe->a0;
   }
 
-  release(&target_proc->lock); //1
+  if(target_proc->state == RUNNABLE) {
+    
+    acquire(&p->lock);  //2
+    p->chan = p->trapframe;
+    p->state = SLEEPING;
+    release(&p->lock);  //2
 
-  // first arriver
-  sleep(p->trapframe, &wait_lock);
-  release(&wait_lock); //0
-  return (int)p->trapframe->a0;
+    target_proc->state = RUNNING;
+    mycpu()->proc = target_proc;
+
+    swtch(&p->context, &target_proc->context);
+    mycpu()->proc = p;
+
+    p->chan = 0;
+    release(&p->lock);
+    target_proc->trapframe->a0 = (uint64)value;
+    return (int)p->trapframe->a0;
+  }
+
+  release(&target_proc->lock); //1
+  return -1;
 }
